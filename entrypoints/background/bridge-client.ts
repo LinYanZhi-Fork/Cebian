@@ -111,6 +111,30 @@ class BridgeClient {
     });
   }
 
+  /** 委托任务给桌面 AI（让桌面 AI 自主规划执行），返回 Promise */
+  async delegateDesktopTask(task: string): Promise<string> {
+    if (!this.connected) throw new Error(`[bridge:${this.name}] 未连接到桌面端，无法委托任务`);
+
+    const id = `desktop_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+    return new Promise((resolve, reject) => {
+      // 5 分钟超时（桌面 AI 可能执行大量工具调用）
+      const timer = setTimeout(() => {
+        this._pendingDesktopRequests.delete(id);
+        reject(new Error(`桌面 AI 任务执行超时（5分钟）：${task.slice(0, 100)}`));
+      }, 5 * 60_000);
+
+      this._pendingDesktopRequests.set(id, { resolve, reject, timer });
+
+      this.ws!.send(JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        method: 'desktop/delegate_task',
+        params: { task },
+      }));
+    });
+  }
+
   async start(): Promise<void> {
     this.destroyed = false;
     // 加载或生成 sessionId
@@ -579,6 +603,16 @@ class BridgeClientManager {
     const client = this.clients.find(c => c.connected);
     if (!client) throw new Error(`没有已连接的桌面端，无法调用桌面工具「${tool}」`);
     return client.callDesktopTool(tool, args);
+  }
+
+  /**
+   * 委托任务给桌面 AI（让桌面 AI 自主规划执行）。
+   * 自动选择第一个已连接的桌面客户端。
+   */
+  async delegateDesktopTask(task: string): Promise<string> {
+    const client = this.clients.find(c => c.connected);
+    if (!client) throw new Error('没有已连接的桌面端，无法委托任务');
+    return client.delegateDesktopTask(task);
   }
 
   /** 重置桌面 AI 进度 */

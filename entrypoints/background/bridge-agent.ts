@@ -18,8 +18,6 @@ import {
   customProviders,
 } from '@/lib/persistence/storage';
 import { resolveModel } from '@/lib/providers/resolve-model';
-import { Type } from 'typebox';
-import { bridgeClientManager } from './bridge-client';
 
 /// 桥接任务的系统提示词
 ///
@@ -116,37 +114,6 @@ export interface AgentProgress {
   status: 'running' | 'completed' | 'error';
 }
 
-// ─── 桌面工具调用 ──────────────────────────────────────────
-
-const ExecuteDesktopToolParameters = Type.Object({
-  tool: Type.String({
-    description: '要调用的桌面工具名称。可用工具：read_local_file（读取文件）、list_directory（列出目录）、get_system_info（获取系统信息）',
-  }),
-  arguments: Type.Optional(Type.Any({
-    description: '传递给桌面工具的参数，根据工具不同而不同。read_local_file 需要 { path: string }，list_directory 需要 { path: string }，get_system_info 不需要参数。',
-  })),
-});
-
-const executeDesktopTool: AgentTool<typeof ExecuteDesktopToolParameters> = {
-  name: 'execute_desktop_tool',
-  label: 'Execute Desktop Tool',
-  description:
-    '调用桌面端的本地工具（如读取文件、列出目录、获取系统信息）。' +
-    '当用户询问涉及桌面本地文件、系统信息等不在浏览器范围内的任务时使用。' +
-    '桌面端会执行对应的工具并返回结果。注意：工具名须在白名单中（read_local_file、list_directory、get_system_info），否则会返回错误。',
-  parameters: ExecuteDesktopToolParameters,
-
-  async execute(_toolCallId, params, _signal): Promise<any> {
-    const { tool, arguments: args } = params;
-    if (!tool) throw new Error('缺少 tool 参数');
-    const result = await bridgeClientManager.callDesktopTool(tool, args ?? {});
-    return {
-      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-      details: {},
-    };
-  },
-};
-
 /**
  * 运行桥接 AI 任务
  *
@@ -187,7 +154,7 @@ export async function runBridgeAgentTask(
 
   // 3. 组装工具列表（共享工具 + 桌面工具 + MCP 工具）
   const mcpTools = await discoverMCPTools();
-  const tools: AgentTool<any>[] = [...sharedTools, executeDesktopTool, ...mcpTools];
+  const tools: AgentTool<any>[] = [...sharedTools, ...mcpTools];
 
   // 4. 创建 Agent
   const agent = createCebianAgent({

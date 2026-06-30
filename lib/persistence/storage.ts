@@ -206,3 +206,27 @@ export const webdavConfig = storage.defineItem<WebDavConfig | null>(
   'local:webdavConfig',
   { fallback: null },
 );
+
+// ─── 双 AI 桥接配置 ───
+
+/** 单个桌面端连接配置 */
+export interface DesktopConnection {
+  /** 连接名称（如 "家中电脑"、"公司电脑"） */
+  name: string;
+  /** WebSocket URL（如 ws://127.0.0.1:37421/ws） */
+  url: string;
+}
+
+export interface BridgeConfig {
+  /** 桌面端（CebianDesktop）连接列表 */
+  desktopConnections: DesktopConnection[];
+}
+
+export const bridgeConfig = storage.defineItem<BridgeConfig>(
+  'local:bridgeConfig',
+  {
+    fallback: {
+      desktopConnections: [{ name: '默认桌面端', url: 'ws://127.0.0.1:37421/ws' }],
+    },
+  },
+);

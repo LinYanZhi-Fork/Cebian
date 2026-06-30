@@ -83,6 +83,7 @@ settings:
     backup: "备份与恢复"
     storage: "文件系统"
     advanced: "高级"
+    bridge: "双 AI 桥接"
     about: "关于"
   providers:
     title: "AI 提供商"
@@ -92,6 +93,14 @@ settings:
     usedError: "无法计算"
     openBrowser: "打开文件浏览器"
     description: "按会话浏览 AI 生成的文件。浏览器是只读的，需要导出时用其中的下载按钮。"
+  bridge:
+    title: "双 AI 桥接"
+    desktopPort: "桌面端端口"
+    desktopPortHint: "CebianDesktop 桥接服务器监听的端口号，需与桌面端设置一致"
+    changedNotice: "修改后需重启扩展才能生效"
+    addConnection: "添加连接"
+    namePlaceholder: "连接名称"
+    remove: "移除"
   about:
     title: "关于"
     tagline: "AI 浏览器侧边栏助手"

@@ -4,6 +4,7 @@ import { sessionStore } from './session-store';
 import { recorder } from './recorder';
 import { seedDevStorage } from './dev-seed';
 import { registerBackupHandler } from './backup-handler';
+import { bridgeClientManager } from './bridge-client';
 import { getMCPManager } from '@/lib/mcp/manager';
 import { AGENT_PORT_NAME, type ClientMessage, type ServerMessage } from '@/lib/ipc/protocol';
 import { isRecorderRuntimeMessage, RECORDER_MSG_KIND, type RecorderControlMessage } from '@/lib/recorder/protocol';
@@ -46,6 +47,9 @@ export default defineBackground(() => {
 
   // 注册备份 IPC 响应器（会话采集 / 写回；Dexie 唯一写者经此转发）。
   registerBackupHandler();
+
+  // 启动桌面端桥接客户端管理器（连接所有配置的 CebianDesktop）
+  bridgeClientManager.start();
 
   // Dev-only: seed a custom provider from .env.local if configured.
   // No-op in production builds and when WXT_DEV_API_KEY is empty.

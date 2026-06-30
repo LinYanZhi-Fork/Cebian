@@ -11,6 +11,7 @@ import { MCPSection } from '@/components/settings/sections/MCPSection';
 import { BackupSection } from '@/components/settings/sections/BackupSection';
 import { StorageSection } from '@/components/settings/sections/StorageSection';
 import { AdvancedSection } from '@/components/settings/sections/AdvancedSection';
+import { BridgeSection } from '@/components/settings/sections/BridgeSection';
 import { AboutSection } from '@/components/settings/sections/AboutSection';
 import { lastSettingsSection } from '@/lib/persistence/storage';
 
@@ -46,6 +47,7 @@ export function SettingsRoutes({ basePath, showBackButton = false, showOpenInTab
         <Route path="backup" element={<BackupSection />} />
         <Route path="storage" element={<StorageSection />} />
         <Route path="advanced" element={<AdvancedSection />} />
+        <Route path="bridge" element={<BridgeSection />} />
         <Route path="about" element={<AboutSection />} />
         <Route path="*" element={<Navigate to="." replace />} />
       </Route>

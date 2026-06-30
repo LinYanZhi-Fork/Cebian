@@ -26,7 +26,7 @@ import { createMCPAgentTool } from './mcp-tool';
 /** Non-interactive tools shared by all sessions. `runSkillTool` is intentionally
  *  NOT here —— 每个 session 用 `createSessionRunSkillTool(sessionId)` 拿到
  *  绑定到该 session workspace 的实例，避免 vfs 写入丢失会话上下文。 */
-const sharedTools: AgentTool<any>[] = [
+export const sharedTools: AgentTool<any>[] = [
   executeJsTool, readPageTool, interactTool, inspectTool, tabTool, screenshotTool, pdfTool,
   fsCreateFileTool, fsEditFileTool, fsMkdirTool, fsRenameTool, fsDeleteTool,
   fsReadFileTool, fsListTool, fsSearchTool, fsSaveUrlTool,

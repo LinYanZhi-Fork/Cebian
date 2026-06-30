@@ -1,4 +1,4 @@
-import { Sun, Moon, SunMoon, Settings, SquarePen, History } from 'lucide-react';
+import { Sun, Moon, SunMoon, Settings, SquarePen, History, Monitor } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -16,9 +16,10 @@ interface HeaderProps {
   onOpenSettings: () => void;
   onNewChat: () => void;
   onOpenHistory: () => void;
+  onOpenMonitor?: () => void;
 }
 
-export function Header({ title, isNewChat, theme, onToggleTheme, onOpenSettings, onNewChat, onOpenHistory }: HeaderProps) {
+export function Header({ title, isNewChat, theme, onToggleTheme, onOpenSettings, onNewChat, onOpenHistory, onOpenMonitor }: HeaderProps) {
   return (
     <header className="flex items-center justify-between px-5 py-4 border-b border-border bg-background/80 backdrop-blur-xl z-10">
       <div className="flex items-center gap-2">
@@ -39,6 +40,17 @@ export function Header({ title, isNewChat, theme, onToggleTheme, onOpenSettings,
           </TooltipTrigger>
           <TooltipContent>{t('common.history')}</TooltipContent>
         </Tooltip>
+
+        {onOpenMonitor && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-xs" onClick={onOpenMonitor}>
+                <Monitor className="size-4.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>桌面 AI 监控</TooltipContent>
+          </Tooltip>
+        )}
       </div>
 
       <span className="flex-1 text-center text-sm font-medium truncate px-2">

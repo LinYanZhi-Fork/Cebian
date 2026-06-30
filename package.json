@@ -1,6 +1,6 @@
 {
-  "name": "Cebian",
-  "description": "AI-powered browser extension for enhanced web browsing experience",
+  "name": "Cebian-Lyz-Dev",
+  "description": "AI-powered browser extension for enhanced web browsing experience (forked by Lyz)",
   "private": true,
   "version": "1.4.0",
   "license": "AGPL-3.0-only",

@@ -11,9 +11,11 @@ const t = getDict(lang);
 const ab = t.about;
 
 const GH = 'https://github.com/maotoumao/Cebian';
+const FORK_GH = 'https://github.com/LinYanZhi/Cebian';
 const AUTHOR = 'https://github.com/maotoumao';
+const FORK_AUTHOR = 'https://github.com/LinYanZhi';
 const LICENSE_URL = `${GH}/blob/master/LICENSE`;
-const ISSUES = `${GH}/issues`;
+const ISSUES = `${FORK_GH}/issues`;
 // 隐私声明直接指向仓库内的政策文件（按语言取中英版本）。
 const PRIVACY_URL = `${GH}/blob/master/${lang === 'en' ? 'PRIVACY.md' : 'PRIVACY.zh-CN.md'}`;
 
@@ -46,6 +48,14 @@ const links = [
         <p>{ab.authorBody}</p>
         <a class="ab-card-link" href={AUTHOR} target="_blank" rel="noopener">
           maotoumao
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={arrow}/></svg>
+        </a>
+        <a class="ab-card-link" href={FORK_AUTHOR} target="_blank" rel="noopener">
+          Lyz (fork)
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={arrow}/></svg>
+        </a>
+        <a class="ab-card-link" href={FORK_GH} target="_blank" rel="noopener">
+          {ab.forkRepo}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={arrow}/></svg>
         </a>
       </article>

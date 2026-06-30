@@ -12,7 +12,7 @@ compatibility: >
   fs_mkdir, fs_rename, fs_delete, fs_read_file, fs_list, fs_search),
   ask_user, and run_skill (used to test any skill that ships scripts/).
 metadata:
-  author: maotoumao
+  author: maotoumao + Lyz
   version: "1.0.0"
 ---
 

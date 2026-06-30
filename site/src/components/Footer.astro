@@ -1,12 +1,12 @@
 ---
 import { getDict, localePath, type Lang } from '../lib/i18n';
-import { SOCIAL } from '../lib/social';
 
 interface Props { lang: Lang; }
 const { lang } = Astro.props;
 const t = getDict(lang);
 
 const GH = 'https://github.com/maotoumao/Cebian';
+const FORK_GH = 'https://github.com/LinYanZhi/Cebian';
 
 const productLinks = [
   { href: localePath(lang, '/docs'), label: t.footer.docs },
@@ -25,14 +25,7 @@ const moreLinks = [
   { href: localePath(lang, '/about'), label: t.footer.about, external: false },
 ];
 
-// 底部社交图标（顺序：X → 小红书 → 微信公众号 → bilibili）。渠道 href/图标来自 lib/social，
-// 标签按场景取 footer.social。
-const socials = [
-  { label: t.footer.social.x, ...SOCIAL.x },
-  { label: t.footer.social.xiaohongshu, ...SOCIAL.xiaohongshu },
-  { label: t.footer.social.wechat, ...SOCIAL.wechatPublic },
-  { label: t.footer.social.bilibili, ...SOCIAL.bilibili },
-];
+
 ---
 <footer class="footer">
   <div class="wrap footer-grid">
@@ -45,6 +38,7 @@ const socials = [
       <p class="meta">
         {t.footer.createdBy}
         <a href="https://github.com/maotoumao" target="_blank" rel="noopener">maotoumao</a>
+        · Fork by <a href={FORK_GH} target="_blank" rel="noopener">Lyz</a>
         · AGPL-3.0
       </p>
     </div>
@@ -65,15 +59,7 @@ const socials = [
   <div class="footer-base wrap">
     <div class="footer-base-left">
       <span>© 2026 Cebian</span>
-      <ul class="socials" aria-label={t.footer.social.follow}>
-        {socials.map((s) => (
-          <li>
-            <a href={s.href} target="_blank" rel="noopener" aria-label={s.label} title={s.label}>
-              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d={s.icon} /></svg>
-            </a>
-          </li>
-        ))}
-      </ul>
+      <a href={FORK_GH} target="_blank" rel="noopener" style="font-size:13px;color:var(--ink-subtle);">Fork: LinYanZhi/Cebian</a>
     </div>
     <span class="mono">cebian.catcat.work</span>
   </div>

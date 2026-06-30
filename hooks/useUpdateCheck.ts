@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const CACHE_KEY = 'cebian:updateCheck';
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h
-const RELEASES_URL = 'https://api.github.com/repos/maotoumao/Cebian/releases/latest';
+const RELEASES_URL = 'https://api.github.com/repos/LinYanZhi/Cebian/releases/latest';
 
 export type UpdateStatus =
   | { kind: 'idle' }

@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Key, MessageSquare, FileText, Blocks, Brain, Plug, Info, DatabaseBackup, HardDrive, Sliders } from 'lucide-react';
+import { Key, MessageSquare, FileText, Blocks, Brain, Plug, Wifi, Info, DatabaseBackup, HardDrive, Sliders } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 
@@ -24,6 +24,7 @@ export const SETTINGS_SECTIONS: SectionNavItem[] = [
   { path: 'mcp', getLabel: () => t('settings.nav.mcp'), icon: Plug },
   { path: 'backup', getLabel: () => t('settings.nav.backup'), icon: DatabaseBackup },
   { path: 'storage', getLabel: () => t('settings.nav.storage'), icon: HardDrive },
+  { path: 'bridge', getLabel: () => t('settings.nav.bridge'), icon: Wifi },
   { path: 'advanced', getLabel: () => t('settings.nav.advanced'), icon: Sliders },
   { path: 'about', getLabel: () => t('settings.nav.about'), icon: Info },
 ];

@@ -1,10 +1,10 @@
 import { setupOAuthRefresh } from './oauth-refresh';
 import { agentManager } from './agent-manager';
-import { runOrganize, recoverOrganizeOnStartup, isOrganizing, setupOrganizeSchedule } from './organize-manager';
 import { sessionStore } from './session-store';
 import { recorder } from './recorder';
 import { seedDevStorage } from './dev-seed';
 import { registerBackupHandler } from './backup-handler';
+import { bridgeClientManager } from './bridge-client';
 import { getMCPManager } from '@/lib/mcp/manager';
 import { AGENT_PORT_NAME, type ClientMessage, type ServerMessage } from '@/lib/ipc/protocol';
 import { isRecorderRuntimeMessage, RECORDER_MSG_KIND, type RecorderControlMessage } from '@/lib/recorder/protocol';
@@ -48,13 +48,9 @@ export default defineBackground(() => {
   // 注册备份 IPC 响应器（会话采集 / 写回；Dexie 唯一写者经此转发）。
   registerBackupHandler();
 
-  // 启动崩溃恢复：清理上次未收尾的整理。尽早触发；runOrganize 会 await 同一记忆化 promise，
-  // 故整理流程不会与恢复重叠。其余记忆读取不强制等待它（崩溃恢复罕见、且 redoCommit 幂等）。
-  void recoverOrganizeOnStartup().catch((err) =>
-    console.warn('[organize] startup recovery failed:', err),
-  );
-  // 自动整理调度：注册周期 alarm（检查廉价，满足够久/够多/空闲才真跑）。
-  setupOrganizeSchedule();
+  // 启动桌面端桥接客户端管理器（连接所有配置的 CebianDesktop）
+  bridgeClientManager.start();
+
   // Dev-only: seed a custom provider from .env.local if configured.
   // No-op in production builds and when WXT_DEV_API_KEY is empty.
   void seedDevStorage().catch(err => console.warn('[dev-seed] failed:', err));
@@ -124,13 +120,6 @@ export default defineBackground(() => {
   }
 
   agentManager.setBroadcast(broadcast);
-
-  /** Post a global (non-session-scoped) message to every connected port. */
-  function broadcastAll(msg: ServerMessage): void {
-    for (const [port] of ports) {
-      safePost(port, msg);
-    }
-  }
 
   // ─── Recorder broadcast ───
 
@@ -369,9 +358,6 @@ export default defineBackground(() => {
               type: 'session_state',
               sessionId: msg.sessionId,
               title: session?.title ?? '',
-              provider: session?.provider ?? '',
-              model: session?.model ?? '',
-              thinkingLevel: session?.thinkingLevel ?? '',
               messages: fresh.messages,
               isRunning: fresh.isRunning,
               isCompacting: fresh.isCompacting,
@@ -473,39 +459,6 @@ export default defineBackground(() => {
       case 'resolve_permission':
         agentManager.resolvePermission(msg.sessionId, msg.toolCallId, msg.decision);
         break;
-
-      case 'memory_organize_query':
-        // 仅回发起端口当前运行态（不带 outcome → UI 不会误弹 toast）。
-        safePost(port, { type: 'memory_organize_state', running: isOrganizing() });
-        break;
-
-      case 'memory_organize': {
-        // 全局、单飞行。已在跑 → 只重播 running:true 同步迟到的 UI，不重入、不误广播 idle。
-        if (isOrganizing()) {
-          broadcastAll({ type: 'memory_organize_state', running: true });
-          break;
-        }
-        broadcastAll({ type: 'memory_organize_state', running: true });
-        // 不 await：整理是后台长任务，立即返回让消息循环继续（结果详情走 memoryOrganizeState）。
-        runOrganize()
-          .then((res) =>
-            broadcastAll({
-              type: 'memory_organize_state',
-              running: false,
-              outcome: res.status === 'ok' ? 'ok' : res.reason === 'already-running' ? undefined : res.reason,
-            }),
-          )
-          .catch((err) => {
-            console.error('[organize] run failed:', err);
-            broadcastAll({
-              type: 'memory_organize_state',
-              running: false,
-              outcome: 'failed',
-              error: err?.message ?? String(err),
-            });
-          });
-        break;
-      }
 
       case 'session_list': {
         const sessions = await sessionStore.list();
@@ -708,6 +661,14 @@ export default defineBackground(() => {
       })();
       return true; // async response
     }
+
+    if (msg?.type === 'bridge_reconnect') {
+      bridgeClientManager.reconnectAll()
+        .then(() => sendResponse({ ok: true }))
+        .catch(() => sendResponse({ ok: false }));
+      return true; // async response
+    }
+
     return false;
   });
 });

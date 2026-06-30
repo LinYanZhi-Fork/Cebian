@@ -2,9 +2,9 @@
 
 <img src="./public/icon/128.png" alt="Cebian" width="96" height="96" />
 
-# Cebian
+# Cebian Lyz-Dev
 
-**AI 驱动的浏览器侧边栏助手**
+**AI 驱动的浏览器侧边栏助手**  *(由 [Lyz](https://github.com/LinYanZhi) fork 自 [maotoumao/Cebian](https://github.com/maotoumao/Cebian))*
 
 **[English](./README.md)** | 简体中文
 
@@ -21,7 +21,7 @@
 >
 > 本项目基于 [AGPL-3.0](./LICENSE) 协议开源，使用时请遵守开源协议。另外希望你在使用代码时已经了解以下说明：
 >
-> 1. 二次分发、打包请**保留代码出处**：<https://github.com/maotoumao/Cebian>
+> 1. 二次分发、打包请**保留代码出处**：<https://github.com/LinYanZhi/Cebian>（原仓库：<https://github.com/maotoumao/Cebian>）
 > 2. 如果希望闭源 / 商用，请通过 GitHub 联系作者获取商业授权
 > 3. 如果开源协议变更，将在此仓库更新，不另行通知
 

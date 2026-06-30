@@ -2,9 +2,9 @@
 
 <img src="./public/icon/128.png" alt="Cebian" width="96" height="96" />
 
-# Cebian
+# Cebian Lyz-Dev
 
-**An AI assistant that lives in your browser side panel**
+**An AI assistant that lives in your browser side panel**  *(forked by [Lyz](https://github.com/LinYanZhi) from [maotoumao/Cebian](https://github.com/maotoumao/Cebian))*
 
 English | **[简体中文](./README.zh-CN.md)**
 
@@ -21,7 +21,7 @@ English | **[简体中文](./README.zh-CN.md)**
 >
 > This project is open-sourced under the [AGPL-3.0](./LICENSE) license. Please respect the license when using the code. In particular:
 >
-> 1. When redistributing or repackaging, **keep the source attribution**: <https://github.com/maotoumao/Cebian>
+> 1. When redistributing or repackaging, **keep the source attribution**: <https://github.com/LinYanZhi/Cebian> (original: <https://github.com/maotoumao/Cebian>)
 > 2. For closed-source or commercial use, please reach out via GitHub for a commercial license.
 > 3. Any future change to the license will be announced in this repository — there will be no separate notification.
 

@@ -1,7 +1,6 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { getDict, langStaticPaths, type Lang } from '../../lib/i18n';
-import { SOCIAL } from '../../lib/social';
 
 export function getStaticPaths() {
   return langStaticPaths();
@@ -13,15 +12,6 @@ const sp = t.sponsor;
 
 const KOFI = 'https://ko-fi.com/maotoumao';
 const WECHAT_QR = '/sponsor/wechat-qr.jpeg';
-
-// 「关注作者」渠道：博客 + 四个品牌渠道，href/图标来自 lib/social，标签取 sponsor.channels。
-const channels = [
-  { label: sp.channels.blog, ...SOCIAL.blog },
-  { label: sp.channels.bilibili, ...SOCIAL.bilibili },
-  { label: sp.channels.xiaohongshu, ...SOCIAL.xiaohongshu },
-  { label: sp.channels.x, ...SOCIAL.x },
-  { label: sp.channels.wechatPublic, ...SOCIAL.wechatPublic },
-];
 ---
 <BaseLayout lang={lang} title={`${sp.title} — ${t.site.name}`} description={sp.lead} path="/sponsor">
   <section class="wrap sp">
@@ -68,18 +58,6 @@ const channels = [
       </article>
     </div>
 
-    <!-- 关注作者 -->
-    <section class="sp-follow">
-      <h2>{sp.followHeading}</h2>
-      <div class="sp-links">
-        {channels.map((c) => (
-          <a class="sp-link" href={c.href} target="_blank" rel="noopener">
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d={c.icon} /></svg>
-            {c.label}
-          </a>
-        ))}
-      </div>
-    </section>
   </section>
 </BaseLayout>
 

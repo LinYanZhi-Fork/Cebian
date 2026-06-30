@@ -11,6 +11,7 @@ import { useStorageItem } from '@/hooks/useStorageItem';
 import { useChangelogOnUpdate } from '@/hooks/useChangelogOnUpdate';
 import { themePreference } from '@/lib/persistence/storage';
 import { ChatPage } from './pages/chat';
+import { DesktopMonitor } from './pages/monitor/DesktopMonitor';
 
 // Lazy-load Settings: pulls in CodeMirror, react-arborist, lightning-fs,
 // all provider/MCP forms, etc. — a large chunk that's only needed once
@@ -113,7 +114,7 @@ function App() {
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex flex-col h-screen overflow-hidden relative">
-        {!location.pathname.startsWith('/settings') && (
+        {!location.pathname.startsWith('/settings') && !location.pathname.startsWith('/monitor') && (
           <Header
             title={chatTitle}
             isNewChat={location.pathname === '/chat/new'}
@@ -122,12 +123,14 @@ function App() {
             onOpenSettings={() => navigate('/settings')}
             onNewChat={handleNewChat}
             onOpenHistory={() => setHistoryOpen(true)}
+            onOpenMonitor={() => navigate('/monitor')}
           />
         )}
 
         <Routes>
           <Route path="/chat/new" element={<ChatPage onOpenSettings={() => navigate('/settings')} onTitleChange={setChatTitle} />} />
           <Route path="/chat/:sessionId" element={<ChatPage onOpenSettings={() => navigate('/settings')} onTitleChange={setChatTitle} />} />
+          <Route path="/monitor" element={<DesktopMonitor />} />
           <Route
             path="/settings/*"
             element={

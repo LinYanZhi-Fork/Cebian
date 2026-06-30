@@ -4,18 +4,61 @@
  * 支持连接到多个 CebianDesktop 桌面端实例。每个桌面端一个独立的 BridgeClient。
  *
  * 协议：JSON-RPC 2.0 over WebSocket
- *  - 连接后立即发送 session/register
+ *  - 连接后立即发送 session/register（含丰富浏览器信息）
  *  - 接收 tools/call 请求并执行
  *  - 发送 tools/call 响应
  *  - 自动重连（指数退避）
  *  - 连接列表可从设置中配置（名称 + IP:端口 URL）
  */
 
-import { bridgeConfig, type DesktopConnection } from '@/lib/persistence/storage';
+import { bridgeConfig, bridgeSessionId, type DesktopConnection } from '@/lib/persistence/storage';
+import { runBridgeAgentTask, type AgentProgress } from './bridge-agent';
 
 /// 重连间隔（毫秒）
 const RECONNECT_BASE_MS = 2000;
 const RECONNECT_MAX_MS = 30_000;
+
+/// 生成 UUID v4
+function uuidV4(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+/// 获取浏览器类型
+function detectBrowserType(): string {
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes('edg/') || ua.includes('edgios')) return 'edge';
+  if (ua.includes('chrome') || ua.includes('crios')) return 'chrome';
+  if (ua.includes('firefox') || ua.includes('fxios')) return 'firefox';
+  if (ua.includes('safari')) return 'safari';
+  if (ua.includes('opr/') || ua.includes('opera')) return 'opera';
+  return 'unknown';
+}
+
+/// 获取浏览器版本
+function detectBrowserVersion(): string {
+  const ua = navigator.userAgent;
+  const edgMatch = ua.match(/Edg\/([\d.]+)/);
+  if (edgMatch) return edgMatch[1];
+  const chromeMatch = ua.match(/Chrome\/([\d.]+)/);
+  if (chromeMatch) return chromeMatch[1];
+  const ffMatch = ua.match(/Firefox\/([\d.]+)/);
+  if (ffMatch) return ffMatch[1];
+  return '';
+}
+
+/// 获取窗口数量
+async function getWindowCount(): Promise<number> {
+  try {
+    const windows = await chrome.windows.getAll();
+    return windows.length;
+  } catch {
+    return 0;
+  }
+}
 
 // ─── 单个桌面端连接 ────────────────────────────────────────
 
@@ -26,6 +69,14 @@ class BridgeClient {
   private destroyed = false;
   readonly name: string;
   readonly url: string;
+  private sessionId: string = '';
+
+  /** 待处理的桌面工具调用请求（id → resolver） */
+  private _pendingDesktopRequests = new Map<string, {
+    resolve: (value: any) => void;
+    reject: (reason: any) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
 
   constructor(name: string, url: string) {
     this.name = name;
@@ -36,8 +87,39 @@ class BridgeClient {
     return this.ws?.readyState === WebSocket.OPEN;
   }
 
-  start(): void {
+  /** 调用桌面端的本地工具，返回 Promise */
+  async callDesktopTool(tool: string, args: any): Promise<any> {
+    if (!this.connected) throw new Error(`[bridge:${this.name}] 未连接到桌面端，无法调用桌面工具`);
+
+    const id = `desktop_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+    return new Promise((resolve, reject) => {
+      // 30 秒超时
+      const timer = setTimeout(() => {
+        this._pendingDesktopRequests.delete(id);
+        reject(new Error(`桌面工具「${tool}」执行超时（30秒）`));
+      }, 30_000);
+
+      this._pendingDesktopRequests.set(id, { resolve, reject, timer });
+
+      this.ws!.send(JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        method: 'desktop/execute_tool',
+        params: { name: tool, arguments: args },
+      }));
+    });
+  }
+
+  async start(): Promise<void> {
     this.destroyed = false;
+    // 加载或生成 sessionId
+    let sid = await bridgeSessionId.getValue();
+    if (!sid) {
+      sid = uuidV4();
+      await bridgeSessionId.setValue(sid);
+    }
+    this.sessionId = sid;
     this.connect();
   }
 
@@ -69,15 +151,53 @@ class BridgeClient {
     }
   }
 
-  private onOpen(ws: WebSocket): void {
+  private async onOpen(ws: WebSocket): Promise<void> {
     console.log(`[bridge:${this.name}] 已连接到桌面端桥接服务器（${this.url}）`);
     this.reconnectAttempt = 0;
 
-    ws.send(JSON.stringify({
+    const browserType = detectBrowserType();
+    const version = detectBrowserVersion();
+    const windowCount = await getWindowCount();
+
+    // 发送丰富注册信息
+    const registerMsg: Record<string, any> = {
       jsonrpc: '2.0',
       method: 'session/register',
-      params: { client_name: this.name },
-    }));
+      params: {
+        session_id: this.sessionId,
+        client_name: this.name,
+        browser: browserType,
+        version,
+        windows: windowCount,
+      },
+    };
+
+    // 尝试获取浏览器画像信息（仅 Chrome 扩展 API 可用时）
+    try {
+      const storage = await chrome.storage.local.get(null);
+      const keys = Object.keys(storage);
+      // 尝试从 chrome.profile 中获取（非标准 API，仅部分浏览器支持）
+      const profile = (chrome as any).runtime?.getProfileInfo;
+      if (profile) {
+        const info = await profile();
+        if (info) {
+          registerMsg.params.profile = info.name || 'Default';
+          registerMsg.params.profile_avatar = info.avatar || '';
+        }
+      }
+    } catch {
+      // 忽略画像获取失败
+    }
+
+    // 如果没获取到画像信息，尝试推断
+    if (!registerMsg.params.profile) {
+      try {
+        const windows = await chrome.windows.getAll();
+        registerMsg.params.windows = windows.length;
+      } catch { /* ignore */ }
+    }
+
+    ws.send(JSON.stringify(registerMsg));
   }
 
   private onClose(ev: CloseEvent): void {
@@ -96,11 +216,92 @@ class BridgeClient {
     try {
       const msg = JSON.parse(ev.data);
       if (msg.jsonrpc !== '2.0') return;
+
+      // ── 处理桌面工具调用的响应 ──
+      if (msg.id?.startsWith('desktop_')) {
+        const pending = this._pendingDesktopRequests.get(msg.id);
+        if (pending) {
+          clearTimeout(pending.timer);
+          this._pendingDesktopRequests.delete(msg.id);
+          if (msg.error) {
+            pending.reject(new Error(msg.error.message || '桌面工具执行失败'));
+          } else {
+            pending.resolve(msg.result);
+          }
+        }
+        return;
+      }
+
       if (msg.method === 'tools/call') {
         this.handleToolCall(msg);
+      } else if (msg.method === 'agent/prompt') {
+        this.handleAgentPrompt(msg);
+      } else if (msg.method === 'desktop/progress') {
+        // 桌面 AI 进度通知 —— 转发到 sidepanel
+        this.handleDesktopProgress(msg);
       }
     } catch (err) {
       console.warn(`[bridge:${this.name}] 消息解析失败:`, err);
+    }
+  }
+
+  /** 处理桌面 AI 进度通知 */
+  private handleDesktopProgress(msg: any): void {
+    const params = msg.params ?? {};
+    if (params.reset) {
+      bridgeClientManager.resetDesktopProgress();
+      return;
+    }
+    if (params.step) {
+      bridgeClientManager.appendDesktopProgressStep(params.step);
+    }
+  }
+
+  /** 处理桌面端 AI 的 agent/prompt 请求 —— 让浏览器 AI 自主完成任务 */
+  private async handleAgentPrompt(msg: any): Promise<void> {
+    const id = msg.id;
+    const task = msg.params?.task ?? msg.params?.arguments?.task ?? '';
+    const timeout = msg.params?.timeout ?? 300_000; // 默认 5 分钟
+
+    if (!id) return;
+    if (!task) {
+      this.sendError(id, '缺少 task 参数');
+      return;
+    }
+
+    console.log(`[bridge:${this.name}] 收到 AI 任务: ${task.slice(0, 100)}...`);
+
+    try {
+      // 创建进度回调：将进度推送到桌面端
+      const progressCallback = (progress: AgentProgress) => {
+        if (!this.connected) return;
+        this.ws!.send(JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'agent/progress',
+          params: {
+            request_id: id,
+            task: progress.task,
+            steps: progress.steps,
+            status: progress.status,
+          },
+        }));
+      };
+
+      // 用超时控制器包装
+      const result = await withTimeout(
+        runBridgeAgentTask(task, progressCallback),
+        timeout,
+        '浏览器 AI 执行超时',
+      );
+      this.sendResponse(id, {
+        success: true,
+        result,
+        task: task.slice(0, 200),
+      });
+      console.log(`[bridge:${this.name}] AI 任务完成`);
+    } catch (err: any) {
+      console.error(`[bridge:${this.name}] AI 任务失败:`, err);
+      this.sendError(id, err.message ?? String(err));
     }
   }
 
@@ -137,7 +338,7 @@ class BridgeClient {
     }));
   }
 
-  // ─── 8 个浏览器工具实现 ───
+  // ─── 浏览器工具实现 ───
 
   private async executeTool(name: string, args: Record<string, any>): Promise<any> {
     switch (name) {
@@ -145,6 +346,7 @@ class BridgeClient {
       case 'read_current_page': return this.readCurrentPage();
       case 'take_screenshot': return this.takeScreenshot();
       case 'get_tab_info': return this.getTabInfo();
+      case 'get_browser_state': return this.getBrowserState();
       case 'execute_js': return this.executeJs(args.code);
       case 'fill_form': return this.fillForm(args.selector, args.value);
       case 'click_element': return this.clickElement(args.selector);
@@ -195,6 +397,46 @@ class BridgeClient {
     if (tabs.length === 0) throw new Error('没有活跃标签页');
     const tab = tabs[0];
     return { tabId: tab.id, windowId: tab.windowId, title: tab.title ?? '', url: tab.url ?? '', favIconUrl: tab.favIconUrl ?? '', status: tab.status, incognito: tab.incognito };
+  }
+
+  /** 获取完整的浏览器状态（所有窗口的所有标签页） */
+  private async getBrowserState(): Promise<any> {
+    const windows = await chrome.windows.getAll({ populate: true });
+    const browserType = detectBrowserType();
+    const version = detectBrowserVersion();
+
+    const winInfo = windows.map(w => ({
+      windowId: w.id,
+      focused: w.focused,
+      incognito: w.incognito,
+      tabs: (w.tabs ?? []).map(t => ({
+        tabId: t.id,
+        index: t.index,
+        title: t.title ?? '',
+        url: t.url ?? '',
+        favIconUrl: t.favIconUrl ?? '',
+        active: t.active,
+        status: t.status,
+        pinned: t.pinned,
+      })),
+    }));
+
+    // 找出当前活跃标签页
+    const activeTab = await chrome.tabs.query({ active: true, currentWindow: true });
+    const current = activeTab[0] ?? null;
+
+    return {
+      browser: browserType,
+      version,
+      windows: winInfo,
+      total_tabs: winInfo.reduce((sum, w) => sum + w.tabs.length, 0),
+      total_windows: windows.length,
+      current_tab: current ? {
+        tabId: current.id,
+        title: current.title ?? '',
+        url: current.url ?? '',
+      } : null,
+    };
   }
 
   private async executeJs(code: string): Promise<any> {
@@ -313,6 +555,52 @@ class BridgeClientManager {
   private clients: BridgeClient[] = [];
   private initialized = false;
 
+  /** 桌面 AI 执行进度（供 sidepanel 读取） */
+  private _desktopAiProgress: { steps: any[]; status: string } = { steps: [], status: 'idle' };
+
+  /** 获取最新桌面 AI 进度 */
+  getDesktopProgress(): { steps: any[]; status: string } {
+    return { ...this._desktopAiProgress, steps: [...this._desktopAiProgress.steps] };
+  }
+
+  /** 追加一个桌面 AI 进度步骤 */
+  appendDesktopProgressStep(step: any): void {
+    this._desktopAiProgress.steps.push(step);
+    this._desktopAiProgress.status = step.type === 'done' ? 'completed' : step.type === 'error' ? 'error' : 'running';
+    // 通知 sidepanel（如果有监听）
+    this.notifySidepanel();
+  }
+
+  /**
+   * 调用桌面端本地工具。
+   * 自动选择第一个已连接的桌面客户端。
+   */
+  async callDesktopTool(tool: string, args: any): Promise<any> {
+    const client = this.clients.find(c => c.connected);
+    if (!client) throw new Error(`没有已连接的桌面端，无法调用桌面工具「${tool}」`);
+    return client.callDesktopTool(tool, args);
+  }
+
+  /** 重置桌面 AI 进度 */
+  resetDesktopProgress(): void {
+    this._desktopAiProgress = { steps: [], status: 'idle' };
+    this.notifySidepanel();
+  }
+
+  /** 通知 sidepanel 进度已更新 */
+  private notifySidepanel(): void {
+    try {
+      chrome.runtime.sendMessage({
+        type: 'desktop-ai-progress',
+        payload: this.getDesktopProgress(),
+      }).catch(() => {
+        // sidepanel 未打开时忽略错误
+      });
+    } catch {
+      // 忽略
+    }
+  }
+
   /** 启动所有已配置的桌面端连接 */
   async start(): Promise<void> {
     if (this.initialized) return;
@@ -369,3 +657,15 @@ class BridgeClientManager {
 
 /** 全局桥接客户端管理器单例 */
 export const bridgeClientManager = new BridgeClientManager();
+
+// ─── 工具函数 ─────────────────────────────────────────────
+
+/** 带超时的 Promise 包装 */
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(message)), ms),
+    ),
+  ]);
+}

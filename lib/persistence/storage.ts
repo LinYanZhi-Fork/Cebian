@@ -230,3 +230,9 @@ export const bridgeConfig = storage.defineItem<BridgeConfig>(
     },
   },
 );
+
+/** 桥接会话唯一 ID（扩展生成，UUID v4，持久化用于重连后识别同一浏览器） */
+export const bridgeSessionId = storage.defineItem<string>(
+  'local:bridgeSessionId',
+  { fallback: '' },
+);

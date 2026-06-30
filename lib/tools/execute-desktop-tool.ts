@@ -1,32 +1,32 @@
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { Type } from 'typebox';
 
-const ExecuteDesktopToolParameters = Type.Object({
-  tool: Type.String({
-    description: '要调用的桌面工具名称。可用工具：read_local_file（读取文件）、list_directory（列出目录）、get_system_info（获取系统信息）',
+const DelegateDesktopTaskParameters = Type.Object({
+  task: Type.String({
+    description: '要交给桌面 AI 执行的任务描述。不要指定具体工具——桌面 AI 会自己规划工具调用。例如："读取桌面上的 B站首页封面 文件夹的内容" 而不是 "list_directory(C:/Users/...)"',
   }),
-  arguments: Type.Optional(Type.Any({
-    description: '传递给桌面工具的参数。read_local_file 需要 { path: string }，list_directory 需要 { path: string }，get_system_info 不需要参数。',
-  })),
 });
 
-export const executeDesktopTool: AgentTool<typeof ExecuteDesktopToolParameters> = {
-  name: 'execute_desktop_tool',
-  label: 'Execute Desktop Tool',
+export const executeDesktopTool: AgentTool<typeof DelegateDesktopTaskParameters> = {
+  name: 'delegate_desktop_task',
+  label: 'Delegate Desktop Task',
   description:
-    '调用桌面端的本地工具（如读取文件、列出目录、获取系统信息）。' +
-    '当用户询问涉及桌面本地文件、系统信息等不在浏览器范围内的任务时使用。' +
-    '桌面端会执行对应的工具并返回结果。注意：工具名须在白名单中（read_local_file、list_directory、get_system_info），否则会返回错误。',
-  parameters: ExecuteDesktopToolParameters,
+    '将任务委托给桌面端的 AI（Desktop AI）自主执行。' +
+    '桌面端收到任务描述后会自己规划工具调用（读文件、列目录、查系统信息等），完成所有操作后返回最终结果。' +
+    '当用户询问涉及桌面本地文件、目录内容、系统信息等不在浏览器范围内的任务时使用。' +
+    '注意：这是"委托"而不是"直接调用"——你只需描述"做什么"，桌面 AI 自己决定"怎么做"。' +
+    '例如用 delegate_desktop_task({ task: "读取桌面B站首页封面文件夹的内容" })，' +
+    '而不是 execute_desktop_tool({ tool: "list_directory", arguments: {...} })。',
+  parameters: DelegateDesktopTaskParameters,
 
   async execute(_toolCallId, params, _signal): Promise<any> {
-    const { tool, arguments: args } = params;
-    if (!tool) throw new Error('缺少 tool 参数');
+    const { task } = params;
+    if (!task) throw new Error('缺少 task 参数');
     // 动态导入避免循环依赖（bridge-client ↔ bridge-agent）
     const { bridgeClientManager } = await import('../../entrypoints/background/bridge-client');
-    const result = await bridgeClientManager.callDesktopTool(tool, args ?? {});
+    const result = await bridgeClientManager.delegateDesktopTask(task);
     return {
-      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      content: [{ type: 'text', text: result }],
       details: {},
     };
   },

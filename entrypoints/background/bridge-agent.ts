@@ -5,9 +5,14 @@
  * 来智能规划并执行目标任务，而不是死板地执行单个工具调用。
  *
  * 关键设计：始终返回有意义的结构化结果，避免"空回复"导致桌面 AI 陷入盲目循环。
+ *
+ * ── 会话延续（conversation_id）──
+ * 每次 agent/prompt 都可携带 conversation_id。首次调用生成新 ID，后续调用
+ * 复用同一 ID 则在上次消息历史基础上继续执行，实现多轮协作的上下文连续性。
+ * 灵感来源：用户反馈「委托仅一次对话，若一次做不完，新开对话完全损失上下文」。
  */
 
-import type { AgentTool } from '@earendil-works/pi-agent-core';
+import type { AgentTool, AgentMessage } from '@earendil-works/pi-agent-core';
 import { createCebianAgent } from './agent';
 import { sharedTools, discoverMCPTools, createSessionRunSkillTool } from '@/lib/tools';
 import {
@@ -103,6 +108,38 @@ const BRIDGE_SYSTEM_PROMPT = `你是一个运行在浏览器扩展中的 AI 执�
 
 8. **工具失败不 panic**：如果连续 2 次尝试同一个工具都失败，停止尝试，在报告中说明失败原因，留给桌面 AI 判断。`;
 
+// ─── 会话延续存储 ────────────────────────────────────────────
+//
+// 存储按 conversation_id 索引的浏览器 AI 对话消息历史，
+// 使桌面 AI 的多次 ask_browser_ai 调用能在同一个浏览器 AI 会话中延续上下文。
+
+interface ConversationState {
+  messages: AgentMessage[];
+  createdAt: number;
+}
+
+const _conversations = new Map<string, ConversationState>();
+
+/** 获取当前存储的会话数量（调试/健康检查用） */
+export function getConversationCount(): number {
+  return _conversations.size;
+}
+
+/** 清除指定会话的上下文 */
+export function clearConversation(conversationId: string): void {
+  _conversations.delete(conversationId);
+}
+
+/** 清理过期会话（默认超过 30 分钟无活动的会话自动清除） */
+export function cleanupOldConversations(maxAgeMs = 30 * 60 * 1000): void {
+  const now = Date.now();
+  for (const [id, state] of _conversations) {
+    if (now - state.createdAt > maxAgeMs) {
+      _conversations.delete(id);
+    }
+  }
+}
+
 /**
  * 桥接任务的执行过程中的一个步骤
  */
@@ -129,24 +166,31 @@ export interface AgentProgress {
  * 创建一个临时的 AI Agent 来执行桌面端交付的高层次任务。
  * Agent 会自主使用浏览器工具来完成任务。
  *
+ * 如果传入 `conversationId` 且有对应的历史消息，则 Agent 会在已有上下文
+ * 基础上继续执行（消息历史作为初始 messages 传给 createCebianAgent），
+ * 实现多轮协作的上下文连续性。
+ *
  * @param task 桌面端 AI 交付的任务描述
  * @param onProgress 可选的进度回调——每产生一个新步骤时调用
  * @param signal 可选的取消信号 - 当桌面 AI 被用户终止时，浏览器 AI 也随之终止
- * @returns 任务执行结果（结构化的执行报告）
+ * @param conversationId 可选的会话 ID。传入已有 ID 则延续之前的对话；不传则新建会话
+ * @returns 任务执行结果，包含报告文本和会话 ID
  */
 export async function runBridgeAgentTask(
   task: string,
   onProgress?: (progress: AgentProgress) => void,
   signal?: AbortSignal,
-): Promise<string> {
+  conversationId?: string,
+): Promise<{ report: string; conversationId: string }> {
   // 1. 加载模型配置
   const modelCfg = await lastSelectedModel.getValue();
   if (!modelCfg) {
-    return JSON.stringify({
+    const report = JSON.stringify({
       success: false,
       error: '浏览器 AI 未配置模型，请在扩展设置中选择一个模型',
       task: task.slice(0, 500),
     });
+    return { report, conversationId: conversationId || '' };
   }
 
   const thinkingLevel = (await lastSelectedThinkingLevel.getValue()) || 'medium';
@@ -156,11 +200,12 @@ export async function runBridgeAgentTask(
   // 2. 解析模型
   const resolved = resolveModel(modelCfg, creds, customProvs || []);
   if (!resolved) {
-    return JSON.stringify({
+    const report = JSON.stringify({
       success: false,
       error: `模型解析失败: ${modelCfg.provider}/${modelCfg.modelId}`,
       task: task.slice(0, 500),
     });
+    return { report, conversationId: conversationId || '' };
   }
 
   // 3. 组装工具列表（共享工具 + run_skill + MCP 工具）
@@ -169,16 +214,27 @@ export async function runBridgeAgentTask(
   const runSkillTool = createSessionRunSkillTool(sessionId);
   const tools: AgentTool<any>[] = [runSkillTool, ...sharedTools, ...mcpTools];
 
-  // 4. 创建 Agent
+  // 4. 加载已有会话消息（若 conversationId 存在），或生成新会话 ID
+  let initialMessages: AgentMessage[] = [];
+  const isNewConversation = !conversationId || !_conversations.has(conversationId);
+  if (!isNewConversation) {
+    const existing = _conversations.get(conversationId!)!;
+    initialMessages = [...existing.messages];
+  } else {
+    conversationId = conversationId || `conv_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+  }
+
+  // 5. 创建 Agent（注入历史消息以延续上下文）
   const agent = createCebianAgent({
     model: resolved,
     systemPrompt: BRIDGE_SYSTEM_PROMPT,
     thinkingLevel: thinkingLevel as any,
     tools,
+    messages: initialMessages,
   });
 
-  // 5. 收集完整的执行记录
-  return new Promise<string>((resolve) => {
+  // 6. 收集完整的执行记录
+  return new Promise<{ report: string; conversationId: string }>((resolve) => {
     let currentAssistantText = '';
     let cancelled = false;
     const steps: AgentProgressStep[] = []; // 可选的进度追踪
@@ -186,7 +242,7 @@ export async function runBridgeAgentTask(
     // 如果外部要求取消，立即返回取消消息
     if (signal?.aborted) {
       cancelled = true;
-      resolve(buildCancelledReport(task));
+      resolve({ report: buildCancelledReport(task), conversationId: conversationId! });
       return;
     }
     const onAbort = () => {
@@ -204,9 +260,19 @@ export async function runBridgeAgentTask(
         steps: [...steps],
         status: 'error',
       });
-      resolve(buildCancelledReport(task));
+      resolve({ report: buildCancelledReport(task), conversationId: conversationId! });
     };
     signal?.addEventListener('abort', onAbort, { once: true });
+
+    /** 保存当前会话的消息历史到存储中 */
+    function saveConversationMessages() {
+      if (conversationId) {
+        _conversations.set(conversationId, {
+          messages: agent.state.messages,
+          createdAt: Date.now(),
+        });
+      }
+    }
 
     /** 添加步骤并触发进度回调 */
     function addStep(step: AgentProgressStep) {
@@ -272,6 +338,9 @@ export async function runBridgeAgentTask(
               status: 'completed',
             });
 
+            // 保存会话消息，供后续延续使用
+            saveConversationMessages();
+
             // 从 state.messages 构建完整执行报告
             const messages = agent.state.messages;
 
@@ -330,7 +399,7 @@ export async function runBridgeAgentTask(
               reportParts.push('\n## 浏览器 AI 回复\n浏览器 AI 已处理请求，但未生成详细回复。');
             }
 
-            resolve(reportParts.join('\n'));
+            resolve({ report: reportParts.join('\n'), conversationId: conversationId! });
             break;
           }
         }
@@ -339,9 +408,11 @@ export async function runBridgeAgentTask(
       }
     });
 
-    // 6. 启动 Agent。prompt() 自身的 reject 在这里处理
+    // 7. 启动 Agent。prompt() 自身的 reject 在这里处理
     agent.prompt(task).catch((err: any) => {
       unsubscribe();
+      // 出错也保存消息（部分执行的内容对后续可能有参考价值）
+      saveConversationMessages();
       addStep({
         type: 'error',
         content: err?.message || String(err),
@@ -357,7 +428,7 @@ export async function runBridgeAgentTask(
         `## 任务\n${task}`,
         `\n## 错误\n浏览器 AI 执行失败: ${err?.message || String(err)}`,
       ].join('\n');
-      resolve(errorReport); // 用 resolve 而不是 reject，确保始终返回字符串
+      resolve({ report: errorReport, conversationId: conversationId! }); // 用 resolve 而不是 reject，确保始终返回字符串
     });
   });
 }

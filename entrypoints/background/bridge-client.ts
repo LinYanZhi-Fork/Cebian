@@ -286,7 +286,11 @@ class BridgeClient {
           if (msg.error) {
             pending.reject(new Error(msg.error.message || '桌面工具执行失败'));
           } else {
-            pending.resolve(msg.result);
+            // msg.result 可能是 { content: "..." }（delegate_task）或原始值（execute_tool）
+            const result = msg.result != null
+              ? (typeof msg.result === 'object' && msg.result.content !== undefined ? msg.result.content : msg.result)
+              : msg.result;
+            pending.resolve(result);
           }
         }
         return;
@@ -334,6 +338,7 @@ class BridgeClient {
     const id = msg.id;
     const task = msg.params?.task ?? msg.params?.arguments?.task ?? '';
     const timeout = msg.params?.timeout ?? 300_000; // 默认 5 分钟
+    const conversationId = msg.params?.conversation_id; // 可选：延续已有会话
 
     if (!id) return;
     if (!task) {
@@ -341,7 +346,8 @@ class BridgeClient {
       return;
     }
 
-    console.log(`[bridge:${this.name}] 收到 AI 任务: ${task.slice(0, 100)}...`);
+    console.log(`[bridge:${this.name}] 收到 AI 任务: ${task.slice(0, 100)}...` +
+      (conversationId ? ` (延续会话 ${conversationId.slice(0, 12)}...)` : ''));
 
     // 创建 AbortController，支持桌面 AI 取消
     const abortController = new AbortController();
@@ -363,18 +369,19 @@ class BridgeClient {
         }));
       };
 
-      // 用超时控制器包装
-      const result = await withTimeout(
-        runBridgeAgentTask(task, progressCallback, abortController.signal),
+      // 用超时控制器包装；传入 conversationId 以延续会话上下文
+      const { report, conversationId: convId } = await withTimeout(
+        runBridgeAgentTask(task, progressCallback, abortController.signal, conversationId),
         timeout,
         '浏览器 AI 执行超时',
       );
       this.sendResponse(id, {
         success: true,
-        result,
+        result: report,
+        conversation_id: convId, // 返回会话 ID，供桌面 AI 后续延续
         task: task.slice(0, 200),
       });
-      console.log(`[bridge:${this.name}] AI 任务完成`);
+      console.log(`[bridge:${this.name}] AI 任务完成 (会话: ${convId.slice(0, 12)}...)`);
     } catch (err: any) {
       console.error(`[bridge:${this.name}] AI 任务失败:`, err);
       this.sendError(id, err.message ?? String(err));

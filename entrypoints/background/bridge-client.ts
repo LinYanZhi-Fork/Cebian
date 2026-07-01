@@ -11,7 +11,13 @@
  *  - 连接列表可从设置中配置（名称 + IP:端口 URL）
  */
 
-import { bridgeConfig, bridgeSessionId, type DesktopConnection } from '@/lib/persistence/storage';
+import {
+  bridgeConfig,
+  bridgeConnectionStatus,
+  bridgeSessionId,
+  type DesktopConnection,
+  type BridgeConnectionStatusData,
+} from '@/lib/persistence/storage';
 import { runBridgeAgentTask, type AgentProgress } from './bridge-agent';
 
 /// 重连间隔（毫秒）
@@ -39,7 +45,24 @@ function detectBrowserType(): string {
 }
 
 /// 获取浏览器版本
-function detectBrowserVersion(): string {
+/// 优先使用 User-Agent Client Hints API 获取完整版本号（解决 Chrome UA 版本号简写问题）
+/// 回退到 User-Agent 字符串解析
+async function detectBrowserVersion(): Promise<string> {
+  // 使用 UA Client Hints 获取完整版本（Chrome 90+ / Edge 90+）
+  try {
+    const nav = navigator as any;
+    if (nav.userAgentData?.getHighEntropyValues) {
+      const hints = await nav.userAgentData.getHighEntropyValues(['fullVersionList']);
+      if (hints.fullVersionList?.length > 0) {
+        // 取第一个有版本号的 brand（通常即浏览器本身）
+        for (const brand of hints.fullVersionList) {
+          if (brand.version) return brand.version;
+        }
+      }
+    }
+  } catch { /* UA Client Hints 不可用，回退到 User-Agent */ }
+
+  // 回退：从 User-Agent 字符串解析
   const ua = navigator.userAgent;
   const edgMatch = ua.match(/Edg\/([\d.]+)/);
   if (edgMatch) return edgMatch[1];
@@ -87,8 +110,18 @@ class BridgeClient {
     return this.ws?.readyState === WebSocket.OPEN;
   }
 
+  /** 获取连接状态（用于 UI 展示） */
+  getStatus(): { name: string; url: string; connected: boolean; connectedAt: number | null } {
+    return {
+      name: this.name,
+      url: this.url,
+      connected: this.connected,
+      connectedAt: this.connected ? Date.now() : null,
+    };
+  }
+
   /** 调用桌面端的本地工具，返回 Promise */
-  async callDesktopTool(tool: string, args: any): Promise<any> {
+    async callDesktopTool(this: BridgeClient, tool: string, args: any): Promise<any> {
     if (!this.connected) throw new Error(`[bridge:${this.name}] 未连接到桌面端，无法调用桌面工具`);
 
     const id = `desktop_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -180,7 +213,7 @@ class BridgeClient {
     this.reconnectAttempt = 0;
 
     const browserType = detectBrowserType();
-    const version = detectBrowserVersion();
+    const version = await detectBrowserVersion();
     const windowCount = await getWindowCount();
 
     // 发送丰富注册信息
@@ -263,6 +296,16 @@ class BridgeClient {
       } else if (msg.method === 'desktop/progress') {
         // 桌面 AI 进度通知 —— 转发到 sidepanel
         this.handleDesktopProgress(msg);
+      } else if (msg.method === '_ping') {
+        // 连通性测试 — 立即返回 pong
+        this.ws!.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: 'pong' }));
+      } else if (msg.id) {
+        // 未知方法但有 id — 返回 method-not-found（证明浏览器是活的）
+        this.ws!.send(JSON.stringify({
+          jsonrpc: '2.0',
+          id: msg.id,
+          error: { code: -32601, message: `Method not found: ${msg.method}` },
+        }));
       }
     } catch (err) {
       console.warn(`[bridge:${this.name}] 消息解析失败:`, err);
@@ -427,7 +470,7 @@ class BridgeClient {
   private async getBrowserState(): Promise<any> {
     const windows = await chrome.windows.getAll({ populate: true });
     const browserType = detectBrowserType();
-    const version = detectBrowserVersion();
+    const version = await detectBrowserVersion();
 
     const winInfo = windows.map(w => ({
       windowId: w.id,
@@ -646,6 +689,15 @@ class BridgeClientManager {
     bridgeConfig.watch(() => {
       this.syncClients();
     });
+
+    // 每 3 秒更新一次连接状态到 storage（供设置页展示）
+    setInterval(() => this.syncStatusToStorage(), 3000);
+  }
+
+  /** 将所有客户端状态写入 storage（设置页读取） */
+  private async syncStatusToStorage(): Promise<void> {
+    const data: BridgeConnectionStatusData = this.clients.map(c => c.getStatus());
+    await bridgeConnectionStatus.setValue(data).catch(() => {});
   }
 
   /** 停止所有连接 */
@@ -657,31 +709,35 @@ class BridgeClientManager {
     this.initialized = false;
   }
 
-  /** 根据配置同步客户端列表（新增/移除） */
+  /** 根据配置同步客户端列表（新增/移除/更新名称） */
   private async syncClients(): Promise<void> {
     const config = await bridgeConfig.getValue();
     const connections: DesktopConnection[] = config?.desktopConnections ?? [
       { name: '默认桌面端', url: 'ws://127.0.0.1:37421/ws' },
     ];
 
-    // 用 URL 做唯一标识来比对
-    const currentUrls = new Set(this.clients.map(c => c.url));
-    const desiredUrls = new Set(connections.map(c => c.url));
+    // 用 URL 做唯一标识
+    const desiredByName = new Map(connections.map(c => [c.url, c.name]));
+    const currentByUrl = new Map(this.clients.map(c => [c.url, c]));
 
     // 移除不再配置的连接
-    for (let i = this.clients.length - 1; i >= 0; i--) {
-      if (!desiredUrls.has(this.clients[i].url)) {
-        this.clients[i].destroy();
-        this.clients.splice(i, 1);
+    for (const [url, client] of currentByUrl) {
+      if (!desiredByName.has(url)) {
+        client.destroy();
+        this.clients.splice(this.clients.indexOf(client), 1);
       }
     }
 
-    // 添加新配置的连接
+    // 添加新配置或更新名称
     for (const conn of connections) {
-      if (!currentUrls.has(conn.url)) {
+      const existing = currentByUrl.get(conn.url);
+      if (!existing) {
         const client = new BridgeClient(conn.name, conn.url);
         this.clients.push(client);
         client.start();
+      } else if (existing.name !== conn.name) {
+        // 更新名称（WebSocket 不需要重建）
+        (existing as any).name = conn.name;
       }
     }
 

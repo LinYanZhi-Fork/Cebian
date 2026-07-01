@@ -231,6 +231,24 @@ export const bridgeConfig = storage.defineItem<BridgeConfig>(
   },
 );
 
+// ─── 桥接连接状态（背景脚本更新，设置页展示） ───
+
+export interface BridgeConnectionStatusItem {
+  name: string;
+  url: string;
+  connected: boolean;
+  connectedAt: number | null;
+}
+
+export type BridgeConnectionStatusData = BridgeConnectionStatusItem[];
+
+export const bridgeConnectionStatus = storage.defineItem<BridgeConnectionStatusData>(
+  'local:bridgeConnectionStatus',
+  {
+    fallback: [],
+  },
+);
+
 /** 桥接会话唯一 ID（扩展生成，UUID v4，持久化用于重连后识别同一浏览器） */
 export const bridgeSessionId = storage.defineItem<string>(
   'local:bridgeSessionId',

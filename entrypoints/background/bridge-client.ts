@@ -101,6 +101,9 @@ class BridgeClient {
     timer: ReturnType<typeof setTimeout>;
   }>();
 
+  /** 活跃的 agent/prompt 请求（id → AbortController），支持桌面 AI 取消 */
+  private _activeAgentPrompts = new Map<string, AbortController>();
+
   constructor(name: string, url: string) {
     this.name = name;
     this.url = url;
@@ -293,6 +296,8 @@ class BridgeClient {
         this.handleToolCall(msg);
       } else if (msg.method === 'agent/prompt') {
         this.handleAgentPrompt(msg);
+      } else if (msg.method === 'tools/cancel') {
+        this.handleToolsCancel(msg);
       } else if (msg.method === 'desktop/progress') {
         // 桌面 AI 进度通知 —— 转发到 sidepanel
         this.handleDesktopProgress(msg);
@@ -338,6 +343,10 @@ class BridgeClient {
 
     console.log(`[bridge:${this.name}] 收到 AI 任务: ${task.slice(0, 100)}...`);
 
+    // 创建 AbortController，支持桌面 AI 取消
+    const abortController = new AbortController();
+    this._activeAgentPrompts.set(id, abortController);
+
     try {
       // 创建进度回调：将进度推送到桌面端
       const progressCallback = (progress: AgentProgress) => {
@@ -356,7 +365,7 @@ class BridgeClient {
 
       // 用超时控制器包装
       const result = await withTimeout(
-        runBridgeAgentTask(task, progressCallback),
+        runBridgeAgentTask(task, progressCallback, abortController.signal),
         timeout,
         '浏览器 AI 执行超时',
       );
@@ -369,6 +378,28 @@ class BridgeClient {
     } catch (err: any) {
       console.error(`[bridge:${this.name}] AI 任务失败:`, err);
       this.sendError(id, err.message ?? String(err));
+    } finally {
+      this._activeAgentPrompts.delete(id);
+    }
+  }
+
+  /** 处理桌面端 AI 的取消请求 —— 终止正在执行的浏览器 AI 任务 */
+  private handleToolsCancel(msg: any): void {
+    const targetId = msg.params?.id;
+    if (!targetId) {
+      // 没有指定 id，取消所有活跃的 agent 任务
+      for (const [reqId, controller] of this._activeAgentPrompts) {
+        console.log(`[bridge:${this.name}] 取消 AI 任务: ${reqId}`);
+        controller.abort();
+      }
+      this._activeAgentPrompts.clear();
+      return;
+    }
+    const controller = this._activeAgentPrompts.get(targetId);
+    if (controller) {
+      console.log(`[bridge:${this.name}] 取消 AI 任务: ${targetId}`);
+      controller.abort();
+      this._activeAgentPrompts.delete(targetId);
     }
   }
 

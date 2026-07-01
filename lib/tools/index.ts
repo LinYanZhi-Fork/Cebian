@@ -16,7 +16,7 @@ import { fsReadFileTool } from './fs-read-file';
 import { fsListTool } from './fs-list';
 import { fsSearchTool } from './fs-search';
 import { fsSaveUrlTool } from './fs-save-url';
-import { createSessionRunSkillTool } from './run-skill';
+import { createSessionRunSkillTool, runSkillTool } from './run-skill';
 import { chromeApiTool } from './chrome-api-tool';
 import { executeDesktopTool } from './execute-desktop-tool';
 import { SessionToolContext } from './session-context';
@@ -107,3 +107,5 @@ export async function createSessionTools(sessionId: string): Promise<{
 
   return { tools, ctx };
 }
+
+export { runSkillTool, createSessionRunSkillTool };

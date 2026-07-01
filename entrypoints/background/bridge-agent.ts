@@ -13,6 +13,7 @@
  */
 
 import type { AgentTool, AgentMessage } from '@earendil-works/pi-agent-core';
+import type { Model, Api } from '@earendil-works/pi-ai';
 import { createCebianAgent } from './agent';
 import { sharedTools, discoverMCPTools, createSessionRunSkillTool } from '@/lib/tools';
 import {
@@ -174,6 +175,7 @@ export interface AgentProgress {
  * @param onProgress 可选的进度回调——每产生一个新步骤时调用
  * @param signal 可选的取消信号 - 当桌面 AI 被用户终止时，浏览器 AI 也随之终止
  * @param conversationId 可选的会话 ID。传入已有 ID 则延续之前的对话；不传则新建会话
+ * @param aiConfig 可选的桌面端 AI 配置。传此参数时浏览器 AI 使用桌面端的模型/API Key/endpoint，跳过扩展自身的配置读取
  * @returns 任务执行结果，包含报告文本和会话 ID
  */
 export async function runBridgeAgentTask(
@@ -181,31 +183,49 @@ export async function runBridgeAgentTask(
   onProgress?: (progress: AgentProgress) => void,
   signal?: AbortSignal,
   conversationId?: string,
+  aiConfig?: { model: string; api_key: string; endpoint: string; thinking_level: string },
 ): Promise<{ report: string; conversationId: string }> {
-  // 1. 加载模型配置
-  const modelCfg = await lastSelectedModel.getValue();
-  if (!modelCfg) {
-    const report = JSON.stringify({
-      success: false,
-      error: '浏览器 AI 未配置模型，请在扩展设置中选择一个模型',
-      task: task.slice(0, 500),
-    });
-    return { report, conversationId: conversationId || '' };
-  }
+  // 1. 确定模型配置：优先使用桌面端传来的 AI 配置
+  let resolved: Model<Api> | null;
+  let thinkingLevel: string;
 
-  const thinkingLevel = (await lastSelectedThinkingLevel.getValue()) || 'medium';
-  const creds = await providerCredentials.getValue();
-  const customProvs = await customProviders.getValue();
+  if (aiConfig?.model && aiConfig?.api_key) {
+    // 使用桌面端 AI 配置（API key、endpoint、模型名），避免在扩展中重复配置
+    resolved = {
+      id: aiConfig.model,
+      baseUrl: aiConfig.endpoint || undefined,
+      headers: {
+        'Authorization': `Bearer ${aiConfig.api_key}`,
+      },
+    } as unknown as Model<Api>;
+    thinkingLevel = aiConfig.thinking_level || 'medium';
 
-  // 2. 解析模型
-  const resolved = resolveModel(modelCfg, creds, customProvs || []);
-  if (!resolved) {
-    const report = JSON.stringify({
-      success: false,
-      error: `模型解析失败: ${modelCfg.provider}/${modelCfg.modelId}`,
-      task: task.slice(0, 500),
-    });
-    return { report, conversationId: conversationId || '' };
+    console.log(`[bridge-agent] 使用桌面端 AI 配置: model=${aiConfig.model}, endpoint=${aiConfig.endpoint}`);
+  } else {
+    // 回退到扩展自身存储的配置
+    const modelCfg = await lastSelectedModel.getValue();
+    if (!modelCfg) {
+      const report = JSON.stringify({
+        success: false,
+        error: '浏览器 AI 未配置模型，请在扩展设置中选择一个模型',
+        task: task.slice(0, 500),
+      });
+      return { report, conversationId: conversationId || '' };
+    }
+
+    thinkingLevel = (await lastSelectedThinkingLevel.getValue()) || 'medium';
+    const creds = await providerCredentials.getValue();
+    const customProvs = await customProviders.getValue();
+
+    resolved = resolveModel(modelCfg, creds, customProvs || []);
+    if (!resolved) {
+      const report = JSON.stringify({
+        success: false,
+        error: `模型解析失败: ${modelCfg.provider}/${modelCfg.modelId}`,
+        task: task.slice(0, 500),
+      });
+      return { report, conversationId: conversationId || '' };
+    }
   }
 
   // 3. 组装工具列表（共享工具 + run_skill + MCP 工具）

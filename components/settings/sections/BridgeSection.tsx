@@ -56,7 +56,7 @@ export function BridgeSection() {
   const getStatusForUrl = (url: string) => connStatus.find(s => s.url === url);
 
   return (
-    <div className="flex-1 space-y-6">
+    <div className="flex-1 overflow-y-auto p-6 space-y-6">
       <h2 className="text-base font-semibold">{t('settings.bridge.title')}</h2>
 
       {/* 连接状态面板 */}

@@ -9,8 +9,7 @@
 
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { createCebianAgent } from './agent';
-import { sharedTools } from '@/lib/tools';
-import { discoverMCPTools } from '@/lib/tools';
+import { sharedTools, discoverMCPTools, createSessionRunSkillTool } from '@/lib/tools';
 import {
   lastSelectedModel,
   lastSelectedThinkingLevel,
@@ -41,7 +40,17 @@ const BRIDGE_SYSTEM_PROMPT = `你是一个运行在浏览器扩展中的 AI 执�
 7. get_page_html — 获取页面 HTML 源码
 8. get_tab_info — 获取当前标签页信息
 9. tabTool — 管理浏览器标签页
-10. VFS 文件系统工具 — 保存文件等
+10. VFS 文件系统工具 — 保存文件、浏览目录等
+
+### 你的技能（Skills）
+
+你的扩展安装了一组 Skill 技能，存储在 VFS（虚拟文件系统）的 ~/.cebian/skills/ 目录中。每个技能是一个独立文件夹，内含 SKILL.md 作为入口描述文件。
+
+- **查看已安装的技能列表**：用 fs_list 工具列出 ~/.cebian/skills/ 目录
+- **读取某个技能的详情**：用 fs_read_file 工具读取 ~/.cebian/skills/<技能名>/SKILL.md
+- **执行某个技能**：用 run_skill 工具执行技能目录中的脚本
+
+当用户问「你有哪些技能」「读读某个技能」等涉及技能的问题时，直接使用 VFS 文件系统工具浏览 ~/.cebian/skills/ 目录即可。
 
 ### 桌面工具调用
 
@@ -122,11 +131,13 @@ export interface AgentProgress {
  *
  * @param task 桌面端 AI 交付的任务描述
  * @param onProgress 可选的进度回调——每产生一个新步骤时调用
+ * @param signal 可选的取消信号 - 当桌面 AI 被用户终止时，浏览器 AI 也随之终止
  * @returns 任务执行结果（结构化的执行报告）
  */
 export async function runBridgeAgentTask(
   task: string,
   onProgress?: (progress: AgentProgress) => void,
+  signal?: AbortSignal,
 ): Promise<string> {
   // 1. 加载模型配置
   const modelCfg = await lastSelectedModel.getValue();
@@ -152,9 +163,11 @@ export async function runBridgeAgentTask(
     });
   }
 
-  // 3. 组装工具列表（共享工具 + 桌面工具 + MCP 工具）
+  // 3. 组装工具列表（共享工具 + run_skill + MCP 工具）
   const mcpTools = await discoverMCPTools();
-  const tools: AgentTool<any>[] = [...sharedTools, ...mcpTools];
+  const sessionId = crypto.randomUUID();
+  const runSkillTool = createSessionRunSkillTool(sessionId);
+  const tools: AgentTool<any>[] = [runSkillTool, ...sharedTools, ...mcpTools];
 
   // 4. 创建 Agent
   const agent = createCebianAgent({
@@ -167,10 +180,37 @@ export async function runBridgeAgentTask(
   // 5. 收集完整的执行记录
   return new Promise<string>((resolve) => {
     let currentAssistantText = '';
+    let cancelled = false;
     const steps: AgentProgressStep[] = []; // 可选的进度追踪
+
+    // 如果外部要求取消，立即返回取消消息
+    if (signal?.aborted) {
+      cancelled = true;
+      resolve(buildCancelledReport(task));
+      return;
+    }
+    const onAbort = () => {
+      if (cancelled) return;
+      cancelled = true;
+      unsubscribe();
+      addStep({
+        type: 'error',
+        content: '🛑 桌面 AI 已被用户终止，浏览器 AI 任务已取消',
+        status: 'cancelled',
+        timestamp: Date.now(),
+      });
+      onProgress?.({
+        task: task.slice(0, 200),
+        steps: [...steps],
+        status: 'error',
+      });
+      resolve(buildCancelledReport(task));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
 
     /** 添加步骤并触发进度回调 */
     function addStep(step: AgentProgressStep) {
+      if (cancelled) return;
       steps.push(step);
       onProgress?.({
         task: task.slice(0, 200),
@@ -282,15 +322,12 @@ export async function runBridgeAgentTask(
             // AI 回复
             if (finalAssistantText?.trim()) {
               reportParts.push(`\n## 浏览器 AI 回复\n${finalAssistantText}`);
+            } else if (toolLog.length > 0) {
+              // 没有文本回复但调用了工具（如 fs_list / fs_read_file ）—— 将工具执行记录作为回复
+              reportParts.push('\n## 浏览器 AI 回复\n任务已执行完毕。执行记录如下：\n' +
+                toolLog.map(l => `- ${l}`).join('\n'));
             } else {
-              // 没有文本回复时，根据工具调用推断
-              const calledTools = toolLog.filter(l => l.startsWith('[工具]'));
-              if (calledTools.length > 0) {
-                reportParts.push('\n## 浏览器 AI 回复\n任务已执行完毕。浏览器 AI 调用了以下工具：\n' +
-                  calledTools.map(t => `- ${t.replace('[工具] ', '')}`).join('\n'));
-              } else {
-                reportParts.push('\n## 浏览器 AI 回复\n浏览器 AI 已处理请求，但未生成详细回复。');
-              }
+              reportParts.push('\n## 浏览器 AI 回复\n浏览器 AI 已处理请求，但未生成详细回复。');
             }
 
             resolve(reportParts.join('\n'));
@@ -323,4 +360,13 @@ export async function runBridgeAgentTask(
       resolve(errorReport); // 用 resolve 而不是 reject，确保始终返回字符串
     });
   });
+}
+
+/** 构建取消报告（桌面 AI 被用户终止时） */
+function buildCancelledReport(task: string): string {
+  return [
+    `## 任务\n${task}`,
+    '\n## 执行记录\n（任务已被用户取消）',
+    '\n## 浏览器 AI 回复\n🛑 桌面 AI 已被用户终止，浏览器 AI 任务已取消。',
+  ].join('\n');
 }

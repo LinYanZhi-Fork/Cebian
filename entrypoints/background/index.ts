@@ -668,11 +668,6 @@ export default defineBackground(() => {
       return true; // async response
     }
 
-    if (msg?.type === 'get-desktop-ai-progress') {
-      // One-shot desktop AI progress query (sidepanel 挂载时调用)
-      sendResponse(bridgeClientManager.getDesktopProgress());
-      return false;
-    }
     return false;
   });
 });

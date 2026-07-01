@@ -302,9 +302,6 @@ class BridgeClient {
         this.handleAgentPrompt(msg);
       } else if (msg.method === 'tools/cancel') {
         this.handleToolsCancel(msg);
-      } else if (msg.method === 'desktop/progress') {
-        // 桌面 AI 进度通知 —— 转发到 sidepanel
-        this.handleDesktopProgress(msg);
       } else if (msg.method === '_ping') {
         // 连通性测试 — 立即返回 pong
         this.ws!.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: 'pong' }));
@@ -321,24 +318,13 @@ class BridgeClient {
     }
   }
 
-  /** 处理桌面 AI 进度通知 */
-  private handleDesktopProgress(msg: any): void {
-    const params = msg.params ?? {};
-    if (params.reset) {
-      bridgeClientManager.resetDesktopProgress();
-      return;
-    }
-    if (params.step) {
-      bridgeClientManager.appendDesktopProgressStep(params.step);
-    }
-  }
-
   /** 处理桌面端 AI 的 agent/prompt 请求 —— 让浏览器 AI 自主完成任务 */
   private async handleAgentPrompt(msg: any): Promise<void> {
     const id = msg.id;
     const task = msg.params?.task ?? msg.params?.arguments?.task ?? '';
     const timeout = msg.params?.timeout ?? 300_000; // 默认 5 分钟
     const conversationId = msg.params?.conversation_id; // 可选：延续已有会话
+    const aiConfig = msg.params?.ai_config; // 可选：桌面端传来的 AI 配置
 
     if (!id) return;
     if (!task) {
@@ -347,7 +333,8 @@ class BridgeClient {
     }
 
     console.log(`[bridge:${this.name}] 收到 AI 任务: ${task.slice(0, 100)}...` +
-      (conversationId ? ` (延续会话 ${conversationId.slice(0, 12)}...)` : ''));
+      (conversationId ? ` (延续会话 ${conversationId.slice(0, 12)}...)` : '') +
+      (aiConfig ? ` (使用桌面 AI 配置: ${aiConfig.model})` : ''));
 
     // 创建 AbortController，支持桌面 AI 取消
     const abortController = new AbortController();
@@ -371,7 +358,7 @@ class BridgeClient {
 
       // 用超时控制器包装；传入 conversationId 以延续会话上下文
       const { report, conversationId: convId } = await withTimeout(
-        runBridgeAgentTask(task, progressCallback, abortController.signal, conversationId),
+        runBridgeAgentTask(task, progressCallback, abortController.signal, conversationId, aiConfig),
         timeout,
         '浏览器 AI 执行超时',
       );
@@ -660,22 +647,6 @@ class BridgeClientManager {
   private clients: BridgeClient[] = [];
   private initialized = false;
 
-  /** 桌面 AI 执行进度（供 sidepanel 读取） */
-  private _desktopAiProgress: { steps: any[]; status: string } = { steps: [], status: 'idle' };
-
-  /** 获取最新桌面 AI 进度 */
-  getDesktopProgress(): { steps: any[]; status: string } {
-    return { ...this._desktopAiProgress, steps: [...this._desktopAiProgress.steps] };
-  }
-
-  /** 追加一个桌面 AI 进度步骤 */
-  appendDesktopProgressStep(step: any): void {
-    this._desktopAiProgress.steps.push(step);
-    this._desktopAiProgress.status = step.type === 'done' ? 'completed' : step.type === 'error' ? 'error' : 'running';
-    // 通知 sidepanel（如果有监听）
-    this.notifySidepanel();
-  }
-
   /**
    * 调用桌面端本地工具。
    * 自动选择第一个已连接的桌面客户端。
@@ -694,26 +665,6 @@ class BridgeClientManager {
     const client = this.clients.find(c => c.connected);
     if (!client) throw new Error('没有已连接的桌面端，无法委托任务');
     return client.delegateDesktopTask(task);
-  }
-
-  /** 重置桌面 AI 进度 */
-  resetDesktopProgress(): void {
-    this._desktopAiProgress = { steps: [], status: 'idle' };
-    this.notifySidepanel();
-  }
-
-  /** 通知 sidepanel 进度已更新 */
-  private notifySidepanel(): void {
-    try {
-      chrome.runtime.sendMessage({
-        type: 'desktop-ai-progress',
-        payload: this.getDesktopProgress(),
-      }).catch(() => {
-        // sidepanel 未打开时忽略错误
-      });
-    } catch {
-      // 忽略
-    }
   }
 
   /** 启动所有已配置的桌面端连接 */

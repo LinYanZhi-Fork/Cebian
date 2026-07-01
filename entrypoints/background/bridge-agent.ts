@@ -442,6 +442,15 @@ export async function runBridgeAgentTask(
       }
     });
 
+    // 如果使用桌面端 AI 配置，必须覆盖 getApiKey 回调。
+    // 原因：agent-core 内部调用 getApiKey(provider) 获取 API key，
+    // 但 provider 值（从 endpoint hostname 提取）与浏览器扩展凭证存储中的 key 不匹配，
+    // 导致返回 undefined → API 请求无认证 → LLM 调用静默失败。
+    // 直接注入 aiConfig 中的 API key 确保认证正确。
+    if (aiConfig) {
+      agent.getApiKey = (_provider: string) => aiConfig.api_key;
+    }
+
     // 7. 启动 Agent。prompt() 自身的 reject 在这里处理
     agent.prompt(task).catch((err: any) => {
       unsubscribe();

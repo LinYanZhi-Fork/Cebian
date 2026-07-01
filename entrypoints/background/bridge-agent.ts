@@ -191,13 +191,27 @@ export async function runBridgeAgentTask(
 
   if (aiConfig?.model && aiConfig?.api_key) {
     // 使用桌面端 AI 配置（API key、endpoint、模型名），避免在扩展中重复配置
+    // 必须完整构造 Model<Api> 对象（含 api、provider 等必需字段），
+    // 否则 pi-ai 无法正确识别 API 类型 → LLM 调用失败 → 不执行任何工具
+    const endpoint = aiConfig.endpoint || '';
+    // 从 endpoint 提取主机名作为 provider 标识
+    let providerId = 'custom';
+    try { providerId = new URL(endpoint).hostname.replace(/[^a-zA-Z0-9_-]/g, '_'); } catch {}
     resolved = {
       id: aiConfig.model,
-      baseUrl: aiConfig.endpoint || undefined,
+      name: aiConfig.model,
+      api: 'openai-completions',
+      provider: providerId,
+      baseUrl: endpoint || 'https://api.openai.com/v1',
       headers: {
         'Authorization': `Bearer ${aiConfig.api_key}`,
       },
-    } as unknown as Model<Api>;
+      reasoning: aiConfig.thinking_level !== 'off',
+      input: ['text'],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128000,
+      maxTokens: 4096,
+    } satisfies Model<Api>;
     thinkingLevel = aiConfig.thinking_level || 'medium';
 
     console.log(`[bridge-agent] 使用桌面端 AI 配置: model=${aiConfig.model}, endpoint=${aiConfig.endpoint}`);

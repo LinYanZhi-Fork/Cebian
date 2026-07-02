@@ -661,6 +661,14 @@ export default defineBackground(() => {
       })();
       return true; // async response
     }
+
+    if (msg?.type === 'bridge_reconnect') {
+      bridgeClientManager.reconnectAll()
+        .then(() => sendResponse({ ok: true }))
+        .catch(() => sendResponse({ ok: false }));
+      return true; // async response
+    }
+
     return false;
   });
 });

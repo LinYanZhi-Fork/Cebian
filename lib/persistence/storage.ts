@@ -254,3 +254,49 @@ export const bridgeSessionId = storage.defineItem<string>(
   'local:bridgeSessionId',
   { fallback: '' },
 );
+
+// ─── 跨对话记忆 ───
+
+/** 跨对话记忆的全局配置。 */
+export interface MemorySettings {
+  enabled: boolean;
+  organize?: {
+    auto: boolean;
+    intervalDays: number;
+    minNewMemories: number;
+    model?: ModelIdentity;
+  };
+}
+
+export const memorySettings = storage.defineItem<MemorySettings>(
+  'local:memorySettings',
+  { fallback: { enabled: false } },
+);
+
+/**
+ * 整理运行结果态（与用户配置分离，防读改写覆盖）。
+ * 由 organise-manager 维护，UI 响应式读取。
+ */
+export interface MemoryOrganizeState {
+  lastAttemptAt?: number;
+  lastRunAt?: number;
+}
+
+export const memoryOrganizeState = storage.defineItem<MemoryOrganizeState>(
+  'local:memoryOrganizeState',
+  { fallback: {} },
+);
+
+const ORGANIZE_DEFAULTS = { auto: false, intervalDays: 14, minNewMemories: 30 };
+
+/**
+ * 整理配置回填：早期只存 { enabled }，后续加了 organize 子结构。WXT 的 fallback
+ * 只在 key 整体缺失时生效、不补「已存在但缺字段」的旧值，故读整理配置统一走此函数。
+ */
+export function resolveOrganizeSettings(s: MemorySettings): { auto: boolean; intervalDays: number; minNewMemories: number; model?: ModelIdentity } {
+  return {
+    ...ORGANIZE_DEFAULTS,
+    ...(s.organize ?? {}),
+    model: s.organize?.model,
+  };
+}

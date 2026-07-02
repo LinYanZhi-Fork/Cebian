@@ -667,10 +667,41 @@ class BridgeClientManager {
     return client.delegateDesktopTask(task);
   }
 
+  /** 强制重新连接所有桌面端 */
+  async reconnectAll(): Promise<void> {
+    // 销毁所有现有客户端
+    for (const c of this.clients) {
+      c.destroy();
+    }
+    this.clients = [];
+
+    // 重置连接状态
+    const config = await bridgeConfig.getValue();
+    const connections = config?.desktopConnections ?? [
+      { name: '默认桌面端', url: 'ws://127.0.0.1:37421/ws' },
+    ];
+    await bridgeConnectionStatus.setValue(
+      connections.map(c => ({ name: c.name, url: c.url, connected: false, connectedAt: null }))
+    ).catch(() => {});
+
+    // 重新创建并启动客户端
+    await this.syncClients();
+  }
+
   /** 启动所有已配置的桌面端连接 */
   async start(): Promise<void> {
     if (this.initialized) return;
     this.initialized = true;
+
+    // 立即重置连接状态为"未连接"，清除 Service Worker 挂起前残留的脏数据
+    // 避免用户看到 stale 的 "connected: true"
+    const config = await bridgeConfig.getValue();
+    const connections = config?.desktopConnections ?? [
+      { name: '默认桌面端', url: 'ws://127.0.0.1:37421/ws' },
+    ];
+    await bridgeConnectionStatus.setValue(
+      connections.map(c => ({ name: c.name, url: c.url, connected: false, connectedAt: null }))
+    ).catch(() => {});
 
     await this.syncClients();
 
@@ -679,8 +710,8 @@ class BridgeClientManager {
       this.syncClients();
     });
 
-    // 每 3 秒更新一次连接状态到 storage（供设置页展示）
-    setInterval(() => this.syncStatusToStorage(), 3000);
+    // 每 1 秒更新一次连接状态到 storage（供设置页展示），缩短间隔让 UI 响应更快
+    setInterval(() => this.syncStatusToStorage(), 1000);
   }
 
   /** 将所有客户端状态写入 storage（设置页读取） */

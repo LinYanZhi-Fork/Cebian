@@ -3,7 +3,7 @@
  *
  * 配置 CebianDesktop 的连接列表，并实时显示每个连接的当前状态。
  */
-import { CircleCheck, CircleX, Plus, Trash2, Wifi } from 'lucide-react';
+import { CircleCheck, CircleX, Plus, RefreshCw, Trash2, Wifi } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { useStorageItem } from '@/hooks/useStorageItem';
 import { bridgeConfig, bridgeConnectionStatus, type BridgeConnectionStatusData } from '@/lib/persistence/storage';
@@ -61,9 +61,19 @@ export function BridgeSection() {
 
       {/* 连接状态面板 */}
       <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Wifi size={16} />
-          <span>{t('settings.bridge.title')}</span>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Wifi size={16} />
+            <span>{t('settings.bridge.title')}</span>
+          </div>
+          <button
+            onClick={() => chrome.runtime.sendMessage({ type: 'bridge_reconnect' })}
+            className="flex items-center gap-1 px-2 py-1 text-xs text-primary hover:bg-primary/10 rounded-md transition-colors"
+            title="强制重新连接所有桌面端"
+          >
+            <RefreshCw size={12} />
+            重新连接
+          </button>
         </div>
 
         {connStatus.length === 0 ? (

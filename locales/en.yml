@@ -88,6 +88,7 @@ settings:
     backup: "Backup & Restore"
     storage: "Filesystem"
     advanced: "Advanced"
+    bridge: "Dual AI Bridge"
     about: "About"
   providers:
     title: "AI providers"
@@ -97,6 +98,14 @@ settings:
     usedError: "Couldn't calculate"
     openBrowser: "Open file browser"
     description: "Browse files the AI created, organized by conversation. The browser is read-only — use the download button there to export."
+  bridge:
+    title: "Dual AI Bridge"
+    desktopPort: "Desktop port"
+    desktopPortHint: "The port that CebianDesktop's bridge server listens on. Must match the desktop setting."
+    changedNotice: "Restart the extension for the change to take effect."
+    addConnection: "Add connection"
+    namePlaceholder: "Connection name"
+    remove: "Remove"
   about:
     title: "About"
     tagline: "AI browser sidebar assistant"

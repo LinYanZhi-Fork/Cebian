@@ -84,6 +84,7 @@ settings:
     backup: "備份與復原"
     storage: "檔案系統"
     advanced: "進階"
+    bridge: "雙 AI 橋接"
     about: "關於"
   providers:
     title: "AI 供應商"
@@ -93,6 +94,14 @@ settings:
     usedError: "無法計算"
     openBrowser: "開啟檔案瀏覽器"
     description: "按對話瀏覽 AI 產生的檔案。瀏覽器是唯讀的，需要匯出時用其中的下載按鈕。"
+  bridge:
+    title: "雙 AI 橋接"
+    desktopPort: "桌面端連接埠"
+    desktopPortHint: "CebianDesktop 橋接伺服器監聽的連接埠號，需與桌面端設定一致"
+    changedNotice: "修改後需重啟擴充套件才能生效"
+    addConnection: "新增連線"
+    namePlaceholder: "連線名稱"
+    remove: "移除"
   about:
     title: "關於"
     tagline: "AI 瀏覽器側邊欄助手"
